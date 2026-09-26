@@ -150,10 +150,6 @@ class Database:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
         return {"ok": check == "ok" and version == self.SCHEMA_VERSION, "check": check, "schema_version": version}
 
-    @staticmethod
-    def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
-        return dict(row) if row else None
-
     def setting(self, key: str, default: str = "") -> str:
         with self.connect() as conn:
             row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -173,7 +169,8 @@ class Database:
 
     def account(self, account_id: int) -> dict[str, Any] | None:
         with self.connect() as conn:
-            return self._dict(conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone())
+            row = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+        return dict(row) if row else None
 
     def create_account(self, label: str, phone: str, api_id: int, api_hash: str) -> int:
         now = utcnow()
@@ -247,21 +244,17 @@ class Database:
             if not row:
                 return None
             result = self._decode_rule(dict(row))
-            result["filters"] = [
-                self._decode_filter(dict(item))
-                for item in conn.execute("SELECT * FROM filter_steps WHERE rule_id=? ORDER BY position,id", (rule_id,))
-            ]
+            result["filters"] = []
+            for item in conn.execute("SELECT * FROM filter_steps WHERE rule_id=? ORDER BY position,id", (rule_id,)):
+                step = dict(item)
+                step["values"] = json.loads(step.pop("values_json"))
+                result["filters"].append(step)
         return result
 
     @staticmethod
     def _decode_rule(rule: dict[str, Any]) -> dict[str, Any]:
         rule["allowed_media"] = json.loads(rule["allowed_media"])
         return rule
-
-    @staticmethod
-    def _decode_filter(step: dict[str, Any]) -> dict[str, Any]:
-        step["values"] = json.loads(step.pop("values_json"))
-        return step
 
     def save_rule(self, data: dict[str, Any], filters: list[dict[str, Any]], rule_id: int | None = None) -> int:
         now = utcnow()
