@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from pathlib import Path
 
 from tfor.db import Database
@@ -38,6 +39,65 @@ def test_duplicate_rules_are_preserved_and_account_archive_disables_them(tmp_pat
 
     assert db.account(account_id)["archived"] == 1
     assert all(rule["enabled"] == 0 for rule in db.rules(account_id))
+
+
+def test_account_restore_preserves_each_rules_previous_enabled_state(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+    account_id = db.create_account("A", "+100", 123, "hash")
+    data = {
+        "name": "route",
+        "account_id": account_id,
+        "source_chat_id": -1001,
+        "source_name": "Source",
+        "source_type": "channel",
+        "target_chat_id": -1002,
+        "target_name": "Target",
+        "target_type": "group",
+        "send_mode": "auto",
+        "delay_seconds": 0,
+        "allowed_media": [],
+        "enabled": 1,
+    }
+    enabled_rule = db.save_rule(data, [])
+    disabled_rule = db.save_rule({**data, "name": "disabled", "enabled": 0}, [])
+
+    db.archive_account(account_id)
+    db.restore_account(account_id)
+
+    assert db.account(account_id)["archived"] == 0
+    assert db.account(account_id)["status"] == "logged_out"
+    assert db.rule(enabled_rule)["enabled"] == 1
+    assert db.rule(disabled_rule)["enabled"] == 0
+
+
+def test_schema_version_and_deferred_job_lifecycle(tmp_path: Path) -> None:
+    db = make_db(tmp_path)
+
+    assert db.health() == {"ok": True, "check": "ok", "schema_version": Database.SCHEMA_VERSION}
+    job_id = db.defer_job(0, 1, 2, -1001, 99, None)
+    jobs = db.claim_deferred_jobs()
+
+    assert [job["id"] for job in jobs] == [job_id]
+    assert db.claim_deferred_jobs() == []
+    db.reschedule_deferred_job(job_id, 0)
+    assert [job["id"] for job in db.claim_deferred_jobs()] == [job_id]
+    db.delete_deferred_job(job_id)
+    assert db.deferred_job_count() == 0
+
+
+def test_initialize_migrates_an_unversioned_rules_table(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE rules (id INTEGER PRIMARY KEY)")
+    db = Database(path)
+
+    db.initialize()
+
+    with db.connect() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(rules)")}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert "archived_by_account" in columns
+    assert version == Database.SCHEMA_VERSION
 
 
 def test_processing_log_stores_metadata_without_message_body(tmp_path: Path) -> None:

@@ -4,7 +4,8 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, TypeVar
 
 from telethon import TelegramClient, errors, events, types, utils
@@ -16,6 +17,12 @@ from .filters import MessageFields, classify_media, evaluate_filters
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+class DeferredFloodWait(Exception):
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+        super().__init__(f"FloodWait deferred for {seconds} seconds")
 
 
 def display_name(entity: Any) -> str:
@@ -31,27 +38,37 @@ def entity_type(entity: Any) -> str:
 
 
 class TelegramManager:
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, max_concurrent_rules: int = 10, inline_flood_wait_seconds: int = 60):
         self.db = db
+        self.max_concurrent_rules = max(1, max_concurrent_rules)
+        self.inline_flood_wait_seconds = inline_flood_wait_seconds
         self.clients: dict[int, TelegramClient] = {}
         self.login_clients: dict[int, TelegramClient] = {}
         self.pending_albums: set[tuple[int, int, int]] = set()
-        self.sent_messages: set[tuple[int, int, int]] = set()
+        self.sent_messages: dict[tuple[int, int, int], None] = {}
         self.tasks: set[asyncio.Task[Any]] = set()
+        self.rule_slots = asyncio.Semaphore(self.max_concurrent_rules)
+        self.deferred_worker: asyncio.Task[Any] | None = None
 
     async def start(self) -> None:
         for account in self.db.accounts():
             if account["enabled"] and account["session_string"]:
                 await self.connect(account["id"])
+        if not self.deferred_worker or self.deferred_worker.done():
+            self.deferred_worker = self._spawn(self._deferred_loop())
 
     async def stop(self) -> None:
         for task in list(self.tasks):
             task.cancel()
+        if self.tasks:
+            await asyncio.gather(*self.tasks, return_exceptions=True)
         clients = {*self.clients.values(), *self.login_clients.values()}
         if clients:
             await asyncio.gather(*(client.disconnect() for client in clients), return_exceptions=True)
         self.clients.clear()
         self.login_clients.clear()
+        self.tasks.clear()
+        self.deferred_worker = None
 
     def _client(self, account: dict[str, Any]) -> TelegramClient:
         session = StringSession(account.get("session_string") or "")
@@ -189,10 +206,62 @@ class TelegramManager:
             raise ValueError("V1 仅支持频道和群组，不支持私聊")
         return {"id": utils.get_peer_id(entity), "name": display_name(entity), "type": kind}
 
-    def _spawn(self, coroutine: Awaitable[Any]) -> None:
+    def _spawn(self, coroutine: Awaitable[Any]) -> asyncio.Task[Any]:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+        return task
+
+    async def _deferred_loop(self) -> None:
+        while True:
+            try:
+                jobs = self.db.claim_deferred_jobs(limit=self.max_concurrent_rules)
+                if jobs:
+                    await asyncio.gather(*(self._resume_deferred(job) for job in jobs))
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Deferred job worker failed; retrying")
+                await asyncio.sleep(5)
+
+    async def _resume_deferred(self, job: dict[str, Any]) -> None:
+        try:
+            completed = await self._run_rule(
+                job["account_id"],
+                job["rule_id"],
+                job["source_chat_id"],
+                job["source_message_id"],
+                job["grouped_id"],
+                deferred_job_id=job["id"],
+            )
+        except asyncio.CancelledError:
+            self.db.reschedule_deferred_job(job["id"], 0)
+            raise
+        if completed:
+            self.db.delete_deferred_job(job["id"])
+
+    async def _run_rule(
+        self,
+        account_id: int,
+        rule_id: int,
+        chat_id: int,
+        message_id: int,
+        grouped_id: int | None,
+        deferred_job_id: int | None = None,
+    ) -> bool:
+        async with self.rule_slots:
+            return await self._process_rule(
+                account_id, rule_id, chat_id, message_id, grouped_id, deferred_job_id=deferred_job_id
+            )
+
+    def health(self) -> dict[str, int]:
+        return {
+            "connected_accounts": len(self.clients),
+            "active_tasks": max(0, len(self.tasks) - int(self.deferred_worker in self.tasks)),
+            "deferred_jobs": self.db.deferred_job_count(),
+            "deferred_worker_running": int(bool(self.deferred_worker and not self.deferred_worker.done())),
+        }
 
     async def _on_message(self, account_id: int, event: events.NewMessage.Event) -> None:
         message = event.message
@@ -200,7 +269,7 @@ class TelegramManager:
         if message.out or chat_id is None or isinstance(await event.get_chat(), types.User):
             return
         if (account_id, chat_id, message.id) in self.sent_messages:
-            self.sent_messages.discard((account_id, chat_id, message.id))
+            self.sent_messages.pop((account_id, chat_id, message.id), None)
             return
         grouped_id = message.grouped_id
         if grouped_id:
@@ -213,7 +282,7 @@ class TelegramManager:
         self.db.record_source_event(account_id, chat_id, message.id, grouped_id)
         rules = self.db.rules_for_source(account_id, chat_id)
         for rule in rules:
-            self._spawn(self._process_rule(account_id, rule["id"], chat_id, message.id, grouped_id))
+            self._spawn(self._run_rule(account_id, rule["id"], chat_id, message.id, grouped_id))
 
     async def _fetch_messages(
         self, client: TelegramClient, chat_id: int, message_id: int, grouped_id: int | None
@@ -227,13 +296,19 @@ class TelegramManager:
         return sorted((m for m in nearby if m.grouped_id == grouped_id), key=lambda m: m.id)
 
     async def _process_rule(
-        self, account_id: int, rule_id: int, chat_id: int, message_id: int, grouped_id: int | None
-    ) -> None:
+        self,
+        account_id: int,
+        rule_id: int,
+        chat_id: int,
+        message_id: int,
+        grouped_id: int | None,
+        deferred_job_id: int | None = None,
+    ) -> bool:
         started = time.monotonic()
         rule = self.db.rule(rule_id)
         account = self.db.account(account_id)
         if not rule or not account or not rule["enabled"] or not account["enabled"]:
-            return
+            return True
         log_data: dict[str, Any] = {
             "account_id": account_id,
             "account_label": account["label"],
@@ -245,18 +320,18 @@ class TelegramManager:
             "filter_results": [],
         }
         try:
-            if rule["delay_seconds"]:
+            if rule["delay_seconds"] and deferred_job_id is None:
                 await asyncio.sleep(rule["delay_seconds"])
                 rule = self.db.rule(rule_id)
                 if not rule or not rule["enabled"] or rule["account_id"] != account_id:
-                    return
+                    return True
             client = self.clients.get(account_id)
             if not client:
                 raise RuntimeError("账号客户端未连接")
             messages = await self._fetch_messages(client, chat_id, message_id, grouped_id)
             if not messages:
                 log_data["result"] = "deleted"
-                return
+                return True
             primary = next((m for m in messages if m.message), messages[0])
             sender = await primary.get_sender()
             sender_name = display_name(sender) if sender else ""
@@ -268,14 +343,14 @@ class TelegramManager:
             log_data["filter_results"] = filter_results
             if not passed:
                 log_data["result"] = "filtered"
-                return
+                return True
 
             selected = [m for m in messages if classify_media(m) is None or classify_media(m) in rule["allowed_media"]]
             changed = len(selected) != len(messages)
             text = primary.message or ""
             if not selected and not text:
                 log_data["result"] = "filtered"
-                return
+                return True
 
             mode = rule["send_mode"]
             if not selected or (mode == "auto" and changed):
@@ -296,11 +371,20 @@ class TelegramManager:
                 actual_mode = "copy"
             self._remember_sent(account_id, rule["target_chat_id"], sent)
             log_data.update(result="success", actual_mode=actual_mode)
+            return True
+        except DeferredFloodWait as exc:
+            if deferred_job_id is None:
+                self.db.defer_job(exc.seconds, account_id, rule_id, chat_id, message_id, grouped_id)
+            else:
+                self.db.reschedule_deferred_job(deferred_job_id, exc.seconds)
+            log_data.update(result="deferred", error=f"FloodWait: retry scheduled in {exc.seconds} seconds")
+            return False
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log_data.update(result="failed", error=f"{type(exc).__name__}: {str(exc)[:500]}")
             log.exception("Rule %s failed for message %s", rule_id, message_id)
+            return True
         finally:
             if "result" in log_data:
                 log_data["duration_ms"] = int((time.monotonic() - started) * 1000)
@@ -316,22 +400,24 @@ class TelegramManager:
             )
         if len(media_messages) == 1 and classify_media(media_messages[0]) == "other":
             return await self._retry(lambda: client.send_message(target, media_messages[0]))
-        files: list[BytesIO] = []
-        for message in media_messages:
-            data = await self._retry(lambda m=message: client.download_media(m, file=bytes))
-            if data:
-                stream = BytesIO(data)
-                stream.name = self._filename(message)
-                files.append(stream)
-        if not files:
-            if text:
-                return await self._retry(lambda: client.send_message(target, text))
-            raise RuntimeError("媒体下载失败")
-        kwargs: dict[str, Any] = {"caption": text or None}
-        if len(files) == 1:
-            kwargs["formatting_entities"] = getattr(primary, "entities", None)
-            kwargs["voice_note"] = classify_media(media_messages[0]) == "voice"
-        return await self._retry(lambda: client.send_file(target, files if len(files) > 1 else files[0], **kwargs))
+        with TemporaryDirectory(prefix="tfor-") as directory:
+            files: list[str] = []
+            for index, message in enumerate(media_messages):
+                path = Path(directory) / f"{index}-{Path(self._filename(message)).name}"
+                downloaded = await self._retry(
+                    lambda m=message, p=path: client.download_media(m, file=str(p))
+                )
+                if downloaded:
+                    files.append(str(downloaded))
+            if not files:
+                if text:
+                    return await self._retry(lambda: client.send_message(target, text))
+                raise RuntimeError("媒体下载失败")
+            kwargs: dict[str, Any] = {"caption": text or None}
+            if len(files) == 1:
+                kwargs["formatting_entities"] = getattr(primary, "entities", None)
+                kwargs["voice_note"] = classify_media(media_messages[0]) == "voice"
+            return await self._retry(lambda: client.send_file(target, files if len(files) > 1 else files[0], **kwargs))
 
     @staticmethod
     def _filename(message: Any) -> str:
@@ -349,6 +435,8 @@ class TelegramManager:
             try:
                 return await operation()
             except errors.FloodWaitError as exc:
+                if exc.seconds > self.inline_flood_wait_seconds:
+                    raise DeferredFloodWait(exc.seconds) from exc
                 flood_waits += 1
                 if flood_waits > 3:
                     raise
@@ -362,6 +450,8 @@ class TelegramManager:
     def _remember_sent(self, account_id: int, target: int, sent: Any) -> None:
         for message in sent if isinstance(sent, list) else [sent]:
             if message and getattr(message, "id", None):
-                self.sent_messages.add((account_id, target, message.id))
-        if len(self.sent_messages) > 5000:
-            self.sent_messages = set(list(self.sent_messages)[-2500:])
+                key = (account_id, target, message.id)
+                self.sent_messages.pop(key, None)
+                self.sent_messages[key] = None
+        while len(self.sent_messages) > 5000:
+            self.sent_messages.pop(next(iter(self.sent_messages)))

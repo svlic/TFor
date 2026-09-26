@@ -13,6 +13,8 @@ def utcnow() -> str:
 
 
 class Database:
+    SCHEMA_VERSION = 2
+
     def __init__(self, path: Path):
         self.path = path
 
@@ -112,6 +114,35 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_events_created ON source_events(created_at);
                 """
             )
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < 1:
+                rule_columns = {row[1] for row in conn.execute("PRAGMA table_info(rules)")}
+                if "archived_by_account" not in rule_columns:
+                    conn.execute("ALTER TABLE rules ADD COLUMN archived_by_account INTEGER NOT NULL DEFAULT 0")
+                conn.execute("PRAGMA user_version = 1")
+            if version < 2:
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS deferred_jobs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at TEXT NOT NULL,
+                        available_at TEXT NOT NULL,
+                        account_id INTEGER NOT NULL,
+                        rule_id INTEGER NOT NULL,
+                        source_chat_id INTEGER NOT NULL,
+                        source_message_id INTEGER NOT NULL,
+                        grouped_id INTEGER
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_deferred_jobs_available ON deferred_jobs(available_at);
+                    PRAGMA user_version = 2;
+                    """
+                )
+
+    def health(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            check = conn.execute("PRAGMA quick_check").fetchone()[0]
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        return {"ok": check == "ok" and version == self.SCHEMA_VERSION, "check": check, "schema_version": version}
 
     @staticmethod
     def _dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -161,7 +192,26 @@ class Database:
                 "UPDATE accounts SET archived=1, enabled=0, status='archived', updated_at=? WHERE id=?",
                 (utcnow(), account_id),
             )
-            conn.execute("UPDATE rules SET enabled=0, updated_at=? WHERE account_id=?", (utcnow(), account_id))
+            conn.execute(
+                "UPDATE rules SET archived_by_account=enabled, enabled=0, updated_at=? WHERE account_id=?",
+                (utcnow(), account_id),
+            )
+
+    def restore_account(self, account_id: int) -> None:
+        now = utcnow()
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE accounts SET archived=0, enabled=1, "
+                "status=CASE WHEN session_string IS NULL THEN 'logged_out' ELSE 'offline' END, "
+                "status_detail=NULL, updated_at=? "
+                "WHERE id=? AND archived=1",
+                (now, account_id),
+            )
+            conn.execute(
+                "UPDATE rules SET enabled=archived_by_account, archived_by_account=0, updated_at=? "
+                "WHERE account_id=?",
+                (now, account_id),
+            )
 
     def rules(self, account_id: int | None = None, enabled_only: bool = False) -> list[dict[str, Any]]:
         conditions: list[str] = []
@@ -247,6 +297,52 @@ class Database:
                 "INSERT INTO source_events(created_at,account_id,source_chat_id,source_message_id,grouped_id) VALUES(?,?,?,?,?)",
                 (utcnow(), account_id, chat_id, message_id, grouped_id),
             )
+
+    def defer_job(
+        self,
+        delay_seconds: int,
+        account_id: int,
+        rule_id: int,
+        chat_id: int,
+        message_id: int,
+        grouped_id: int | None,
+    ) -> int:
+        available_at = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO deferred_jobs(created_at,available_at,account_id,rule_id,source_chat_id,"
+                "source_message_id,grouped_id) VALUES(?,?,?,?,?,?,?)",
+                (utcnow(), available_at, account_id, rule_id, chat_id, message_id, grouped_id),
+            )
+            return int(cursor.lastrowid)
+
+    def claim_deferred_jobs(self, limit: int = 20, lease_seconds: int = 300) -> list[dict[str, Any]]:
+        now = utcnow()
+        leased_until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM deferred_jobs WHERE available_at<=? ORDER BY available_at,id LIMIT ?",
+                (now, limit),
+            ).fetchall()
+            if rows:
+                conn.executemany(
+                    "UPDATE deferred_jobs SET available_at=? WHERE id=?",
+                    ((leased_until, row["id"]) for row in rows),
+                )
+        return [dict(row) for row in rows]
+
+    def reschedule_deferred_job(self, job_id: int, delay_seconds: int) -> None:
+        available_at = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+        with self.connect() as conn:
+            conn.execute("UPDATE deferred_jobs SET available_at=? WHERE id=?", (available_at, job_id))
+
+    def delete_deferred_job(self, job_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM deferred_jobs WHERE id=?", (job_id,))
+
+    def deferred_job_count(self) -> int:
+        with self.connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM deferred_jobs").fetchone()[0])
 
     def record_log(self, data: dict[str, Any]) -> None:
         fields = (
