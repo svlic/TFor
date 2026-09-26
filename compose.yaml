@@ -1,0 +1,10 @@
+services:
+  tfor:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TFOR_DATABASE_PATH: /app/data/tfor.db
+    volumes:
+      - ./data:/app/data
