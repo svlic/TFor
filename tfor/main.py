@@ -97,11 +97,12 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/accounts", response_class=HTMLResponse)
 async def accounts(request: Request) -> HTMLResponse:
+    all_accounts = db.accounts(include_archived=True)
     return page(
         request,
         "accounts.html",
-        accounts=db.accounts(),
-        archived_accounts=[account for account in db.accounts(include_archived=True) if account["archived"]],
+        accounts=[account for account in all_accounts if not account["archived"]],
+        archived_accounts=[account for account in all_accounts if account["archived"]],
         default_api_id=db.setting("default_api_id"),
         default_api_hash=db.setting("default_api_hash"),
     )
@@ -246,7 +247,7 @@ def parse_filters(raw: str) -> list[dict[str, object]]:
             raise ValueError("过滤字段无效")
         if match_mode not in ("contains", "exact", "regex"):
             raise ValueError("匹配方式无效")
-        values = [value.strip() for value in str(item.get("values", "")).splitlines() if value.strip()]
+        values = [value for line in str(item.get("values", "")).splitlines() if (value := line.strip())]
         if not values:
             continue
         if match_mode == "regex":
