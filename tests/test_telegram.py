@@ -71,6 +71,7 @@ def test_long_flood_wait_is_persisted_for_later_retry(tmp_path: Path) -> None:
             "send_mode": "forward",
             "delay_seconds": 0,
             "allowed_media": [],
+            "captioned_media_only": 0,
             "enabled": 1,
         },
         [],
@@ -99,6 +100,77 @@ def test_long_flood_wait_is_persisted_for_later_retry(tmp_path: Path) -> None:
     assert completed is False
     assert db.deferred_job_count() == 1
     assert db.logs()[0]["result"] == "deferred"
+
+
+def test_album_can_forward_only_the_media_with_caption(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    db.initialize()
+    account_id = db.create_account("A", "+100", 123, "hash")
+    rule_id = db.save_rule(
+        {
+            "name": "captioned album media",
+            "account_id": account_id,
+            "source_chat_id": -1001,
+            "source_name": "Source",
+            "source_type": "channel",
+            "target_chat_id": -1002,
+            "target_name": "Target",
+            "target_type": "group",
+            "send_mode": "forward",
+            "delay_seconds": 0,
+            "allowed_media": ["photo"],
+            "captioned_media_only": 1,
+            "enabled": 1,
+        },
+        [],
+    )
+    forwarded: list[object] = []
+
+    class ForwardClient:
+        async def forward_messages(self, target: int, messages: list[object], from_peer: int) -> object:
+            assert target == -1002
+            assert from_peer == -1001
+            forwarded.extend(messages)
+            return SimpleNamespace(id=101)
+
+    async def get_sender() -> None:
+        return None
+
+    messages = [
+        SimpleNamespace(id=10, message="", sender_id=7, media=object(), photo=object(), get_sender=get_sender),
+        SimpleNamespace(
+            id=11, message="the caption", sender_id=7, media=object(), photo=object(), get_sender=get_sender
+        ),
+        SimpleNamespace(id=12, message="", sender_id=7, media=object(), photo=object(), get_sender=get_sender),
+    ]
+    manager = TelegramManager(db)
+    manager.clients[account_id] = ForwardClient()  # type: ignore[assignment]
+
+    async def fetch_messages(*_: object) -> list[object]:
+        return messages
+
+    manager._fetch_messages = fetch_messages  # type: ignore[method-assign]
+
+    completed = asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, 999))
+
+    assert completed is True
+    assert forwarded == [messages[1]]
+    assert db.logs()[0]["actual_mode"] == "forward"
+
+    forwarded.clear()
+    messages[1].message = ""
+    asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, 999))
+
+    assert forwarded == []
+    assert db.logs()[0]["result"] == "filtered"
+
+    async def fetch_single_message(*_: object) -> list[object]:
+        return [messages[0]]
+
+    manager._fetch_messages = fetch_single_message  # type: ignore[method-assign]
+    asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, None))
+
+    assert forwarded == [messages[0]]
 
 
 def test_copy_uses_temporary_files_instead_of_loading_media_into_memory(tmp_path: Path) -> None:

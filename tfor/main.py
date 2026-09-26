@@ -266,6 +266,7 @@ async def save_rule_from_form(
     send_mode: str,
     delay_seconds: int,
     allowed_media: list[str],
+    captioned_media_only: bool,
     enabled: bool,
     filters_json: str,
 ) -> RedirectResponse:
@@ -289,6 +290,7 @@ async def save_rule_from_form(
                 "send_mode": send_mode,
                 "delay_seconds": delay_seconds,
                 "allowed_media": [m for m in allowed_media if m in MEDIA_TYPES],
+                "captioned_media_only": int(captioned_media_only),
                 "enabled": int(enabled),
             },
             parse_filters(filters_json),
@@ -304,18 +306,26 @@ async def save_rule_from_form(
 async def create_rule(
     name: str = Form(...), account_id: int = Form(...), source_chat_id: int = Form(...),
     target_chat_id: int = Form(...), send_mode: str = Form(...), delay_seconds: int = Form(0),
-    allowed_media: list[str] = Form(default=[]), enabled: bool = Form(False), filters_json: str = Form("[]"),
+    allowed_media: list[str] = Form(default=[]), captioned_media_only: bool = Form(False),
+    enabled: bool = Form(False), filters_json: str = Form("[]"),
 ) -> RedirectResponse:
-    return await save_rule_from_form(None, name, account_id, source_chat_id, target_chat_id, send_mode, delay_seconds, allowed_media, enabled, filters_json)
+    return await save_rule_from_form(
+        None, name, account_id, source_chat_id, target_chat_id, send_mode, delay_seconds,
+        allowed_media, captioned_media_only, enabled, filters_json,
+    )
 
 
 @app.post("/rules/{rule_id}")
 async def update_rule(
     rule_id: int, name: str = Form(...), account_id: int = Form(...), source_chat_id: int = Form(...),
     target_chat_id: int = Form(...), send_mode: str = Form(...), delay_seconds: int = Form(0),
-    allowed_media: list[str] = Form(default=[]), enabled: bool = Form(False), filters_json: str = Form("[]"),
+    allowed_media: list[str] = Form(default=[]), captioned_media_only: bool = Form(False),
+    enabled: bool = Form(False), filters_json: str = Form("[]"),
 ) -> RedirectResponse:
-    return await save_rule_from_form(rule_id, name, account_id, source_chat_id, target_chat_id, send_mode, delay_seconds, allowed_media, enabled, filters_json)
+    return await save_rule_from_form(
+        rule_id, name, account_id, source_chat_id, target_chat_id, send_mode, delay_seconds,
+        allowed_media, captioned_media_only, enabled, filters_json,
+    )
 
 
 @app.post("/rules/{rule_id}/toggle")

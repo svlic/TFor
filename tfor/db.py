@@ -13,7 +13,7 @@ def utcnow() -> str:
 
 
 class Database:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: Path):
         self.path = path
@@ -68,6 +68,7 @@ class Database:
                     send_mode TEXT NOT NULL CHECK(send_mode IN ('auto','forward','copy')),
                     delay_seconds INTEGER NOT NULL DEFAULT 0,
                     allowed_media TEXT NOT NULL,
+                    captioned_media_only INTEGER NOT NULL DEFAULT 0,
                     enabled INTEGER NOT NULL DEFAULT 1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -137,6 +138,11 @@ class Database:
                     PRAGMA user_version = 2;
                     """
                 )
+            if version < 3:
+                rule_columns = {row[1] for row in conn.execute("PRAGMA table_info(rules)")}
+                if "captioned_media_only" not in rule_columns:
+                    conn.execute("ALTER TABLE rules ADD COLUMN captioned_media_only INTEGER NOT NULL DEFAULT 0")
+                conn.execute("PRAGMA user_version = 3")
 
     def health(self) -> dict[str, Any]:
         with self.connect() as conn:
@@ -261,7 +267,8 @@ class Database:
         now = utcnow()
         fields = (
             "name", "account_id", "source_chat_id", "source_name", "source_type", "target_chat_id",
-            "target_name", "target_type", "send_mode", "delay_seconds", "allowed_media", "enabled",
+            "target_name", "target_type", "send_mode", "delay_seconds", "allowed_media", "captioned_media_only",
+            "enabled",
         )
         values = [json.dumps(data[key]) if key == "allowed_media" else data[key] for key in fields]
         with self.connect() as conn:

@@ -345,7 +345,12 @@ class TelegramManager:
                 log_data["result"] = "filtered"
                 return True
 
-            selected = [m for m in messages if classify_media(m) is None or classify_media(m) in rule["allowed_media"]]
+            candidates = messages
+            if grouped_id and rule["captioned_media_only"]:
+                candidates = [primary] if primary.message else []
+            selected = [
+                m for m in candidates if classify_media(m) is None or classify_media(m) in rule["allowed_media"]
+            ]
             changed = len(selected) != len(messages)
             text = primary.message or ""
             if not selected and not text:

@@ -24,6 +24,7 @@
 
     <section class="panel form-panel"><div class="section-title"><span>3</span><div><h2>媒体允许列表</h2><p>纯文本始终不受此列表影响</p></div></div>
       <div class="media-grid">{% for media in media_types %}<label><input type="checkbox" name="allowed_media" value="{{ media }}" {{ 'checked' if not rule or media in rule.allowed_media }}><span class="media-icon">{{ {'photo':'▧','video':'▶','document':'▤','audio':'♫','voice':'≋','other':'◇'}[media] }}</span><b>{{ {'photo':'图片','video':'视频','document':'文档','audio':'音频','voice':'语音','other':'其它'}[media] }}</b><small>{{ media }}</small></label>{% endfor %}</div>
+      <label class="toggle-row album-option"><span><b>相册仅发送带 Caption 的媒体</b><small>启用后忽略同一相册中的其它媒体；没有 Caption 的相册不会发送</small></span><input type="checkbox" name="captioned_media_only" value="true" {{ 'checked' if rule and rule.captioned_media_only }}><i></i></label>
     </section>
   </div>
   <aside class="save-panel panel"><h3>规则状态</h3><label class="toggle-row"><span><b>保存后启用</b><small>配置将立即生效</small></span><input type="checkbox" name="enabled" value="true" {{ 'checked' if not rule or rule.enabled }}><i></i></label><hr><p>系统会以该账号同时监听来源并发送到目标，不支持跨账号发送。</p><button class="button primary full" {% if not accounts %}disabled{% endif %}>保存规则</button><a href="/rules" class="button full">取消</a></aside>

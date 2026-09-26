@@ -27,6 +27,7 @@ def test_duplicate_rules_are_preserved_and_account_archive_disables_them(tmp_pat
         "send_mode": "auto",
         "delay_seconds": 0,
         "allowed_media": ["photo"],
+        "captioned_media_only": 1,
         "enabled": 1,
     }
     first = db.save_rule(data, [])
@@ -34,6 +35,7 @@ def test_duplicate_rules_are_preserved_and_account_archive_disables_them(tmp_pat
 
     assert first != second
     assert len(db.rules_for_source(account_id, -1001)) == 2
+    assert db.rule(first)["captioned_media_only"] == 1
 
     db.archive_account(account_id)
 
@@ -56,6 +58,7 @@ def test_account_restore_preserves_each_rules_previous_enabled_state(tmp_path: P
         "send_mode": "auto",
         "delay_seconds": 0,
         "allowed_media": [],
+        "captioned_media_only": 0,
         "enabled": 1,
     }
     enabled_rule = db.save_rule(data, [])
@@ -97,6 +100,23 @@ def test_initialize_migrates_an_unversioned_rules_table(tmp_path: Path) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(rules)")}
         version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert "archived_by_account" in columns
+    assert "captioned_media_only" in columns
+    assert version == Database.SCHEMA_VERSION
+
+
+def test_initialize_adds_caption_option_to_version_two_database(tmp_path: Path) -> None:
+    path = tmp_path / "version-two.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE rules (id INTEGER PRIMARY KEY)")
+        conn.execute("PRAGMA user_version = 2")
+    db = Database(path)
+
+    db.initialize()
+
+    with db.connect() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(rules)")}
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    assert "captioned_media_only" in columns
     assert version == Database.SCHEMA_VERSION
 
 

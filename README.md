@@ -24,6 +24,8 @@ uvicorn tfor.main:app --host 0.0.0.0 --port 8000
 
 也可以在“系统设置”中配置新账号默认使用的 Telegram `api_id` / `api_hash`。
 
+规则可按媒体类型过滤相册，也可启用“相册仅发送带 Caption 的媒体”：启用后，同一相册中只有带 Caption 的那条媒体会被发送；没有 Caption 的相册不会发送。该选项不影响普通单条消息。
+
 ## 测试
 
 ```bash

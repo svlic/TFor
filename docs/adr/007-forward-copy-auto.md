@@ -24,6 +24,7 @@ Copy 应尽力保留文本格式、caption、文件名、voice 属性和相册�
 
 - Auto 只捕获 `ChatForwardsRestrictedError` 进行失败降级。
 - Copy 把媒体下载到独立临时目录，发送完成后删除，避免把整份媒体保存在 Python 内存中。
+- 规则可选择只发送相册中带 Caption 的媒体；该选择改变相册结构，因此 Auto 使用 Copy。显式 Forward 仍原生转发选中的单条媒体。
 - 当前没有单文件大小或临时磁盘总量限制；Copy 受全局规则并发上限约束。
 - `TFOR_INLINE_FLOOD_WAIT_SECONDS` 控制进程内等待阈值，SQLite `deferred_jobs` 保存更长等待。
 - 已发送消息 ID 只在内存中短暂保存，用于降低回流风险。
