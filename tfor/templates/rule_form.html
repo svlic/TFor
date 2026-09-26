@@ -16,13 +16,13 @@
       </div>
     </section>
 
-    <section class="panel form-panel"><div class="section-title"><span>2</span><div><h2>过滤流水线</h2><p>按从上到下顺序执行，任一步拒绝即停止</p></div><button type="button" class="button small" id="add-filter">＋ 添加步骤</button></div>
+    <section class="panel form-panel"><div class="section-title"><span>2</span><div><h2>过滤流水线</h2><p>按从上到下顺序执行，任一步拒绝即停止；相册正文只检查第一条非空 Caption</p></div><button type="button" class="button small" id="add-filter">＋ 添加步骤</button></div>
       <div id="filter-list" class="filter-list"></div>
       <input type="hidden" name="filters_json" id="filters-json">
       <div id="filter-empty" class="empty-inline">未配置过滤步骤，所有文本与发送者均通过。</div>
     </section>
 
-    <section class="panel form-panel"><div class="section-title"><span>3</span><div><h2>媒体允许列表</h2><p>纯文本始终不受此列表影响</p></div></div>
+    <section class="panel form-panel"><div class="section-title"><span>3</span><div><h2>媒体允许列表</h2><p>纯文本始终不受此列表影响；媒体被过滤后不会单独发送其 Caption</p></div></div>
       <div class="media-grid">{% for media in media_types %}<label><input type="checkbox" name="allowed_media" value="{{ media }}" {{ 'checked' if not rule or media in rule.allowed_media }}><span class="media-icon">{{ {'photo':'▧','video':'▶','document':'▤','audio':'♫','voice':'≋','other':'◇'}[media] }}</span><b>{{ {'photo':'图片','video':'视频','document':'文档','audio':'音频','voice':'语音','other':'其它'}[media] }}</b><small>{{ media }}</small></label>{% endfor %}</div>
       <label class="toggle-row album-option"><span><b>相册仅发送带 Caption 的媒体</b><small>启用后忽略同一相册中的其它媒体；没有 Caption 的相册不会发送</small></span><input type="checkbox" name="captioned_media_only" value="true" {{ 'checked' if rule and rule.captioned_media_only }}><i></i></label>
     </section>

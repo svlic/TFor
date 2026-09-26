@@ -172,6 +172,153 @@ def test_album_can_forward_only_the_media_with_caption(tmp_path: Path) -> None:
 
     assert forwarded == [messages[0]]
 
+def test_filtered_media_does_not_send_its_caption(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    db.initialize()
+    account_id = db.create_account("A", "+100", 123, "hash")
+    rule_id = db.save_rule(
+        {
+            "name": "video only",
+            "account_id": account_id,
+            "source_chat_id": -1001,
+            "source_name": "Source",
+            "source_type": "channel",
+            "target_chat_id": -1002,
+            "target_name": "Target",
+            "target_type": "group",
+            "send_mode": "copy",
+            "delay_seconds": 0,
+            "allowed_media": ["video"],
+            "captioned_media_only": 0,
+            "enabled": 1,
+        },
+        [],
+    )
+    sent_captions: list[str | None] = []
+
+    class CopyClient:
+        async def download_media(self, message: object, file: str) -> str:
+            path = Path(file)
+            path.write_bytes(b"media")
+            return str(path)
+
+        async def send_file(self, target: int, file: str, **kwargs: object) -> object:
+            assert target == -1002
+            sent_captions.append(kwargs.get("caption"))  # type: ignore[arg-type]
+            return SimpleNamespace(id=101)
+
+        async def send_message(self, *_: object, **__: object) -> object:
+            raise AssertionError("被过滤媒体的 Caption 不应单独发送")
+
+    async def get_sender() -> None:
+        return None
+
+    photo = SimpleNamespace(
+        id=10,
+        message="photo caption",
+        sender_id=7,
+        media=object(),
+        photo=object(),
+        file=SimpleNamespace(name="photo.jpg", ext=".jpg"),
+        entities=None,
+        get_sender=get_sender,
+    )
+    video = SimpleNamespace(
+        id=11,
+        message="",
+        sender_id=7,
+        media=object(),
+        photo=None,
+        video=object(),
+        file=SimpleNamespace(name="video.mp4", ext=".mp4"),
+        entities=None,
+        get_sender=get_sender,
+    )
+    manager = TelegramManager(db)
+    manager.clients[account_id] = CopyClient()  # type: ignore[assignment]
+
+    async def fetch_album(*_: object) -> list[object]:
+        return [photo, video]
+
+    manager._fetch_messages = fetch_album  # type: ignore[method-assign]
+    completed = asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, 999))
+
+    assert completed is True
+    assert sent_captions == [None]
+
+    async def fetch_photo(*_: object) -> list[object]:
+        return [photo]
+
+    manager._fetch_messages = fetch_photo  # type: ignore[method-assign]
+    asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, None))
+
+    assert sent_captions == [None]
+    assert db.logs()[0]["result"] == "filtered"
+
+
+def test_album_filters_check_only_the_primary_caption(tmp_path: Path) -> None:
+    db = Database(tmp_path / "test.db")
+    db.initialize()
+    account_id = db.create_account("A", "+100", 123, "hash")
+    rule_id = db.save_rule(
+        {
+            "name": "primary caption",
+            "account_id": account_id,
+            "source_chat_id": -1001,
+            "source_name": "Source",
+            "source_type": "channel",
+            "target_chat_id": -1002,
+            "target_name": "Target",
+            "target_type": "group",
+            "send_mode": "forward",
+            "delay_seconds": 0,
+            "allowed_media": ["photo"],
+            "captioned_media_only": 0,
+            "enabled": 1,
+        },
+        [
+            {
+                "kind": "blacklist",
+                "field": "text",
+                "match_mode": "contains",
+                "values": ["secondary blocked"],
+                "enabled": True,
+            }
+        ],
+    )
+    forwarded: list[object] = []
+
+    class ForwardClient:
+        async def forward_messages(self, target: int, messages: list[object], from_peer: int) -> object:
+            forwarded.extend(messages)
+            return SimpleNamespace(id=101)
+
+    async def get_sender() -> None:
+        return None
+
+    messages = [
+        SimpleNamespace(id=10, message="", sender_id=7, media=object(), photo=object(), get_sender=get_sender),
+        SimpleNamespace(
+            id=11, message="primary caption", sender_id=7, media=object(), photo=object(), get_sender=get_sender
+        ),
+        SimpleNamespace(
+            id=12, message="secondary blocked", sender_id=7, media=object(), photo=object(), get_sender=get_sender
+        ),
+    ]
+    manager = TelegramManager(db)
+    manager.clients[account_id] = ForwardClient()  # type: ignore[assignment]
+
+    async def fetch_messages(*_: object) -> list[object]:
+        return messages
+
+    manager._fetch_messages = fetch_messages  # type: ignore[method-assign]
+    completed = asyncio.run(manager._process_rule(account_id, rule_id, -1001, 10, 999))
+
+    assert completed is True
+    assert forwarded == messages
+    assert db.logs()[0]["result"] == "success"
+
+
 
 def test_copy_uses_temporary_files_instead_of_loading_media_into_memory(tmp_path: Path) -> None:
     db = Database(tmp_path / "test.db")

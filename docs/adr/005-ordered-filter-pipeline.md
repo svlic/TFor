@@ -25,6 +25,7 @@ blacklist 命中或 whitelist 未命中时立即拒绝并停止后续步骤。se
 
 - `filter_steps` 按 `position,id` 排序。
 - Web 保存流程会校验步骤枚举值并编译每个 regex，非法配置会拒绝保存。运行时仍保留非法 regex 不崩溃的防御行为，用于兼容旧数据或直接数据库修改。
+- 相册正文只使用第一条非空 Caption 作为主 Caption，不合并或逐条检查其它 Caption。
 - 日志只记录步骤、匹配方式及 PASS/REJECT，不记录过滤值或命中片段。
 
 ## 后果

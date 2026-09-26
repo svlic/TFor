@@ -352,13 +352,13 @@ class TelegramManager:
                 m for m in candidates if classify_media(m) is None or classify_media(m) in rule["allowed_media"]
             ]
             changed = len(selected) != len(messages)
-            text = primary.message or ""
-            if not selected and not text:
+            text = (primary.message or "") if primary in selected else ""
+            if not selected:
                 log_data["result"] = "filtered"
                 return True
 
             mode = rule["send_mode"]
-            if not selected or (mode == "auto" and changed):
+            if mode == "auto" and changed:
                 mode = "copy"
             if mode in ("forward", "auto"):
                 try:
