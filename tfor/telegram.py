@@ -314,7 +314,7 @@ class TelegramManager:
     def health(self) -> dict[str, int]:
         return {
             "connected_accounts": len(self.clients),
-            "active_tasks": max(0, len(self.tasks) - int(self.deferred_worker in self.tasks)),
+            "active_tasks": len(self.tasks) - int(self.deferred_worker in self.tasks),
             "pending_rules": self.pending_rule_count,
             "deferred_jobs": self.db.deferred_job_count(),
             "deferred_worker_running": int(bool(self.deferred_worker and not self.deferred_worker.done())),
@@ -497,9 +497,9 @@ class TelegramManager:
         messages: list[Any],
         text: str,
         primary: Any,
-        account_id: int | None = None,
+        account_id: int,
     ) -> Any:
-        slow_mode_key = (account_id, target) if account_id is not None else None
+        slow_mode_key = (account_id, target)
         media_messages = [message for message in messages if classify_media(message) is not None]
         if not media_messages:
             return await self._retry(

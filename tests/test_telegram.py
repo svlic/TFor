@@ -590,7 +590,7 @@ def test_copy_uses_temporary_files_instead_of_loading_media_into_memory(tmp_path
             sent_paths.append(path)
             return SimpleNamespace(id=11)
 
-    result = asyncio.run(manager._copy(CopyClient(), -1002, [message], "caption", message))  # type: ignore[arg-type]
+    result = asyncio.run(manager._copy(CopyClient(), -1002, [message], "caption", message, account_id=1))  # type: ignore[arg-type]
 
     assert result.id == 11
     assert len(sent_paths) == 1
