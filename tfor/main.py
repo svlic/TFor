@@ -18,7 +18,10 @@ from .config import (
     INLINE_FLOOD_WAIT_SECONDS,
     LOG_LEVEL,
     LOG_RETENTION_DAYS,
+    MAX_CONCURRENT_COPIES,
+    MAX_CONCURRENT_COPIES_PER_ACCOUNT,
     MAX_CONCURRENT_RULES,
+    MAX_PENDING_RULES,
     MEDIA_TYPES,
 )
 from .db import Database
@@ -28,7 +31,14 @@ from .telegram import TelegramManager
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 db = Database(DATABASE_PATH)
-manager = TelegramManager(db, MAX_CONCURRENT_RULES, INLINE_FLOOD_WAIT_SECONDS)
+manager = TelegramManager(
+    db,
+    max_concurrent_rules=MAX_CONCURRENT_RULES,
+    inline_flood_wait_seconds=INLINE_FLOOD_WAIT_SECONDS,
+    max_pending_rules=MAX_PENDING_RULES,
+    max_concurrent_copies=MAX_CONCURRENT_COPIES,
+    max_concurrent_copies_per_account=MAX_CONCURRENT_COPIES_PER_ACCOUNT,
+)
 templates = Jinja2Templates(directory=BASE_DIR / "tfor" / "templates")
 
 
