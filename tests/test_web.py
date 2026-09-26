@@ -1,6 +1,9 @@
+import json
+
+import pytest
 from fastapi.testclient import TestClient
 
-from tfor.main import app
+from tfor.main import app, parse_filters
 
 
 def test_core_pages_render() -> None:
@@ -16,4 +19,26 @@ def test_core_pages_render() -> None:
             assert response.status_code == 200
             assert heading in response.text
 
-        assert client.get("/health").json() == {"status": "ok"}
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "ok"
+        assert health.json()["database"]["ok"] is True
+        assert health.json()["runtime"]["deferred_worker_running"] == 1
+
+
+def test_filter_parser_rejects_invalid_regex() -> None:
+    raw = json.dumps(
+        [{"kind": "blacklist", "field": "text", "match_mode": "regex", "values": "[invalid"}]
+    )
+
+    with pytest.raises(ValueError, match="正则表达式无效"):
+        parse_filters(raw)
+
+
+def test_filter_parser_rejects_unknown_step_options() -> None:
+    raw = json.dumps(
+        [{"kind": "unknown", "field": "text", "match_mode": "contains", "values": "value"}]
+    )
+
+    with pytest.raises(ValueError, match="过滤类型无效"):
+        parse_filters(raw)

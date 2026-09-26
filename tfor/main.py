@@ -3,22 +3,32 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from .config import BASE_DIR, DATABASE_PATH, LOG_LEVEL, LOG_RETENTION_DAYS, MEDIA_TYPES
+from .config import (
+    BASE_DIR,
+    DATABASE_PATH,
+    INLINE_FLOOD_WAIT_SECONDS,
+    LOG_LEVEL,
+    LOG_RETENTION_DAYS,
+    MAX_CONCURRENT_RULES,
+    MEDIA_TYPES,
+)
 from .db import Database
 from .telegram import TelegramManager
 
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger(__name__)
 db = Database(DATABASE_PATH)
-manager = TelegramManager(db)
+manager = TelegramManager(db, MAX_CONCURRENT_RULES, INLINE_FLOOD_WAIT_SECONDS)
 templates = Jinja2Templates(directory=BASE_DIR / "tfor" / "templates")
 
 
@@ -59,8 +69,15 @@ def redirect(path: str, message: str = "", error: str = "") -> RedirectResponse:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> JSONResponse:
+    try:
+        database = db.health()
+        if not database["ok"]:
+            return JSONResponse({"status": "error", "database": database}, status_code=503)
+        return JSONResponse({"status": "ok", "database": database, "runtime": manager.health()})
+    except Exception:
+        log.exception("Health check failed")
+        return JSONResponse({"status": "error", "database": {"ok": False}}, status_code=503)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,6 +91,7 @@ async def accounts(request: Request) -> HTMLResponse:
         request,
         "accounts.html",
         accounts=db.accounts(),
+        archived_accounts=[account for account in db.accounts(include_archived=True) if account["archived"]],
         default_api_id=db.setting("default_api_id"),
         default_api_hash=db.setting("default_api_hash"),
     )
@@ -165,6 +183,18 @@ async def archive_account(account_id: int) -> RedirectResponse:
     return redirect("/accounts", "账号已归档，关联规则已全部停用")
 
 
+@app.post("/accounts/{account_id}/restore")
+async def restore_account(account_id: int) -> RedirectResponse:
+    account = db.account(account_id)
+    if not account or not account["archived"]:
+        return redirect("/accounts", error="归档账号不存在")
+    db.restore_account(account_id)
+    if account["session_string"]:
+        await manager.connect(account_id)
+        return redirect("/accounts", "账号和原有规则已恢复")
+    return redirect(f"/accounts?open_login={account_id}", "账号和原有规则已恢复，请重新登录")
+
+
 @app.get("/rules", response_class=HTMLResponse)
 async def rules(request: Request) -> HTMLResponse:
     return page(request, "rules.html", rules=db.rules())
@@ -191,16 +221,35 @@ async def edit_rule(request: Request, rule_id: int) -> HTMLResponse:
 
 def parse_filters(raw: str) -> list[dict[str, object]]:
     decoded = json.loads(raw or "[]")
+    if not isinstance(decoded, list):
+        raise ValueError("过滤配置必须是步骤列表")
     result = []
     for item in decoded:
+        if not isinstance(item, dict):
+            raise ValueError("过滤步骤格式无效")
+        kind = item.get("kind")
+        field = item.get("field")
+        match_mode = item.get("match_mode")
+        if kind not in ("blacklist", "whitelist"):
+            raise ValueError("过滤类型无效")
+        if field not in ("text", "sender_name", "sender_username", "sender_id"):
+            raise ValueError("过滤字段无效")
+        if match_mode not in ("contains", "exact", "regex"):
+            raise ValueError("匹配方式无效")
         values = [value.strip() for value in str(item.get("values", "")).splitlines() if value.strip()]
         if not values:
             continue
+        if match_mode == "regex":
+            for value in values:
+                try:
+                    re.compile(value)
+                except re.error as exc:
+                    raise ValueError(f"正则表达式无效：{value}（{exc}）") from exc
         result.append(
             {
-                "kind": item["kind"],
-                "field": item["field"],
-                "match_mode": item["match_mode"],
+                "kind": kind,
+                "field": field,
+                "match_mode": match_mode,
                 "values": values,
                 "enabled": bool(item.get("enabled", True)),
             }

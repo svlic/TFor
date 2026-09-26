@@ -19,6 +19,8 @@ uvicorn tfor.main:app --host 0.0.0.0 --port 8000
 - `TFOR_DATABASE_PATH`：SQLite 文件路径，默认 `./data/tfor.db`
 - `TFOR_HOST` / `TFOR_PORT`：Docker 启动时使用的监听地址与端口
 - `TFOR_LOG_LEVEL`：日志级别，默认 `INFO`
+- `TFOR_MAX_CONCURRENT_RULES`：同时执行的规则数上限，默认 `10`
+- `TFOR_INLINE_FLOOD_WAIT_SECONDS`：进程内直接等待 FloodWait 的最大秒数，默认 `60`；更长等待会写入 SQLite 延后队列
 
 也可以在“系统设置”中配置新账号默认使用的 Telegram `api_id` / `api_hash`。
 
