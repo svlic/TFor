@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Telegram 账号{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">连接管理</p><h1>Telegram 账号</h1><p>每个账号独立监听并发送所属规则</p></div>
+  <button class="button primary" data-dialog="new-account">＋ 新增账号</button>
+</div>
+
+{% if accounts %}<div class="card-list">
+{% for account in accounts %}
+  <article class="account-card">
+    <div class="account-avatar">{{ account.label[:1].upper() }}</div>
+    <div class="account-main">
+      <div class="account-title"><h2>{{ account.label }}</h2><span class="status {{ account.status }}"><i></i>{{ {'online':'在线','offline':'离线','disabled':'已停用','logged_out':'未登录','code_required':'待验证码','password_required':'待 2FA','error':'异常'}.get(account.status, account.status) }}</span></div>
+      <p>{{ account.telegram_name or '尚未绑定 Telegram 用户' }} · {{ account.phone }}</p>
+      {% if account.status_detail %}<small class="status-detail">{{ account.status_detail }}</small>{% endif %}
+    </div>
+    <div class="actions">
+      {% if account.status in ['logged_out','code_required','password_required'] %}<button class="button small primary" data-dialog="login-{{ account.id }}">登录</button>{% endif %}
+      {% if account.session_string %}
+      <form method="post" action="/accounts/{{ account.id }}/toggle"><button class="button small">{{ '停用' if account.enabled else '启用' }}</button></form>
+      <form method="post" action="/accounts/{{ account.id }}/reconnect"><button class="button small">重连</button></form>
+      <form method="post" action="/accounts/{{ account.id }}/logout"><button class="button small">重新登录</button></form>
+      {% endif %}
+      <button class="icon-button" data-dialog="edit-{{ account.id }}" title="编辑">✎</button>
+      <form method="post" action="/accounts/{{ account.id }}/archive" data-confirm="归档账号会停用其全部规则，确定继续？"><button class="icon-button danger" title="归档">×</button></form>
+    </div>
+  </article>
+
+  <dialog id="login-{{ account.id }}" class="modal">
+    <div class="modal-head"><div><p class="eyebrow">网页登录</p><h2>{{ account.label }}</h2></div><button data-close>×</button></div>
+    {% if account.status == 'password_required' %}
+    <form method="post" action="/accounts/{{ account.id }}/login/password" class="form-stack"><label>两步验证密码<input name="password" type="password" required autocomplete="current-password"></label><button class="button primary full">完成登录</button></form>
+    {% elif account.status == 'code_required' %}
+    <form method="post" action="/accounts/{{ account.id }}/login/code" class="form-stack"><label>Telegram 验证码<input name="code" inputmode="numeric" required autocomplete="one-time-code" placeholder="12345"></label><button class="button primary full">验证并登录</button></form>
+    {% else %}
+    <p class="modal-copy">验证码将发送到 <b>{{ account.phone }}</b> 对应的 Telegram 客户端。</p>
+    <form method="post" action="/accounts/{{ account.id }}/login/start"><button class="button primary full">发送验证码</button></form>
+    {% endif %}
+  </dialog>
+
+  <dialog id="edit-{{ account.id }}" class="modal">
+    <div class="modal-head"><div><p class="eyebrow">账号配置</p><h2>编辑 {{ account.label }}</h2></div><button data-close>×</button></div>
+    <form method="post" action="/accounts/{{ account.id }}/edit" class="form-stack">
+      <label>显示名称<input name="label" value="{{ account.label }}" required></label>
+      <label>手机号<input name="phone" value="{{ account.phone }}" required></label>
+      <div class="form-row"><label>API ID<input name="api_id" type="number" value="{{ account.api_id }}" required></label><label>API Hash<input name="api_hash" value="{{ account.api_hash }}" required></label></div>
+      <p class="hint">修改 API 凭据会清除现有 Session，需要重新登录。</p><button class="button primary full">保存配置</button>
+    </form>
+  </dialog>
+{% endfor %}
+</div>{% else %}<div class="empty"><span>◉</span><h2>还没有 Telegram 账号</h2><p>添加第一个用户账号，完成网页验证后即可创建转发规则。</p><button class="button primary" data-dialog="new-account">新增账号</button></div>{% endif %}
+
+<dialog id="new-account" class="modal">
+  <div class="modal-head"><div><p class="eyebrow">第一步</p><h2>新增 Telegram 账号</h2></div><button data-close>×</button></div>
+  <form method="post" action="/accounts" class="form-stack">
+    <label>显示名称<input name="label" required placeholder="例如：运营账号 A"></label>
+    <label>手机号<input name="phone" required placeholder="+86 13800000000"></label>
+    <div class="form-row"><label>API ID<input name="api_id" type="number" value="{{ default_api_id }}" required></label><label>API Hash<input name="api_hash" value="{{ default_api_hash }}" required></label></div>
+    <p class="hint">凭据来自 <a href="https://my.telegram.org" target="_blank">my.telegram.org</a>。创建后继续完成验证码与 2FA。</p>
+    <button class="button primary full">创建并继续</button>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}{% if request.query_params.get('open_login') %}<script>document.getElementById('login-{{ request.query_params.get("open_login") }}')?.showModal()</script>{% endif %}{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑规则' if rule else '新增规则' }}{% endblock %}
+{% block content %}
+<div class="page-head compact-head"><div><a href="/rules" class="back-link">← 返回规则</a><h1>{{ '编辑规则' if rule else '新增规则' }}</h1><p>保存时会使用所选账号验证两个 Chat ID</p></div></div>
+{% if not accounts %}<div class="notice">当前没有可用账号。请先前往 <a href="/accounts">Telegram 账号</a> 完成登录。</div>{% endif %}
+<form method="post" action="{{ '/rules/' ~ rule.id if rule else '/rules' }}" id="rule-form" class="rule-layout">
+  <div class="form-main">
+    <section class="panel form-panel"><div class="section-title"><span>1</span><div><h2>基础配置</h2><p>选择同一个监听与发送账号</p></div></div>
+      <div class="form-grid">
+        <label class="span-2">规则名称<input name="name" value="{{ rule.name if rule else '' }}" required placeholder="例如：公告频道 → 讨论群"></label>
+        <label class="span-2">Telegram 账号<select name="account_id" required>{% for account in accounts %}<option value="{{ account.id }}" {{ 'selected' if rule and rule.account_id == account.id }}>{{ account.label }} · {{ account.telegram_name or account.phone }}{{ '（未在线）' if account.status != 'online' }}</option>{% endfor %}</select></label>
+        <label>Source Chat ID<input name="source_chat_id" type="number" value="{{ rule.source_chat_id if rule else '' }}" required placeholder="-1001234567890">{% if rule %}<small>当前：{{ rule.source_name }} · {{ rule.source_type }}</small>{% endif %}</label>
+        <label>Target Chat ID<input name="target_chat_id" type="number" value="{{ rule.target_chat_id if rule else '' }}" required placeholder="-1009876543210">{% if rule %}<small>当前：{{ rule.target_name }} · {{ rule.target_type }}</small>{% endif %}</label>
+        <label>发送模式<select name="send_mode"><option value="auto" {{ 'selected' if not rule or rule.send_mode == 'auto' }}>AUTO · 自动选择</option><option value="forward" {{ 'selected' if rule and rule.send_mode == 'forward' }}>FORWARD · 原生转发</option><option value="copy" {{ 'selected' if rule and rule.send_mode == 'copy' }}>COPY · 复制发送</option></select></label>
+        <label>延迟处理（秒）<input name="delay_seconds" type="number" min="0" value="{{ rule.delay_seconds if rule else 0 }}" required><small>延迟结束后重新获取最新消息/相册</small></label>
+      </div>
+    </section>
+
+    <section class="panel form-panel"><div class="section-title"><span>2</span><div><h2>过滤流水线</h2><p>按从上到下顺序执行，任一步拒绝即停止</p></div><button type="button" class="button small" id="add-filter">＋ 添加步骤</button></div>
+      <div id="filter-list" class="filter-list"></div>
+      <input type="hidden" name="filters_json" id="filters-json">
+      <div id="filter-empty" class="empty-inline">未配置过滤步骤，所有文本与发送者均通过。</div>
+    </section>
+
+    <section class="panel form-panel"><div class="section-title"><span>3</span><div><h2>媒体允许列表</h2><p>纯文本始终不受此列表影响</p></div></div>
+      <div class="media-grid">{% for media in media_types %}<label><input type="checkbox" name="allowed_media" value="{{ media }}" {{ 'checked' if not rule or media in rule.allowed_media }}><span class="media-icon">{{ {'photo':'▧','video':'▶','document':'▤','audio':'♫','voice':'≋','other':'◇'}[media] }}</span><b>{{ {'photo':'图片','video':'视频','document':'文档','audio':'音频','voice':'语音','other':'其它'}[media] }}</b><small>{{ media }}</small></label>{% endfor %}</div>
+    </section>
+  </div>
+  <aside class="save-panel panel"><h3>规则状态</h3><label class="toggle-row"><span><b>保存后启用</b><small>配置将立即生效</small></span><input type="checkbox" name="enabled" value="true" {{ 'checked' if not rule or rule.enabled }}><i></i></label><hr><p>系统会以该账号同时监听来源并发送到目标，不支持跨账号发送。</p><button class="button primary full" {% if not accounts %}disabled{% endif %}>保存规则</button><a href="/rules" class="button full">取消</a></aside>
+</form>
+{% endblock %}
+{% block scripts %}<script>
+window.initialFilters = {{ (rule.filters if rule else [])|tojson }};
+</script>{% endblock %}

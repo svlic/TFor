@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}转发规则{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">实时配置</p><h1>转发规则</h1><p>每条规则独立执行，不对重复目标去重</p></div>
+  <a class="button primary" href="/rules/new">＋ 新增规则</a>
+</div>
+{% if rules %}
+<div class="panel table-panel"><div class="table-wrap"><table>
+  <thead><tr><th>规则</th><th>账号</th><th>来源 → 目标</th><th>模式</th><th>延迟</th><th>状态</th><th></th></tr></thead>
+  <tbody>{% for rule in rules %}<tr>
+    <td><b>{{ rule.name }}</b><small>#{{ rule.id }}</small></td>
+    <td>{{ rule.account_label }}</td>
+    <td class="route-cell"><span>{{ rule.source_name }}<small>{{ rule.source_chat_id }}</small></span><i>→</i><span>{{ rule.target_name }}<small>{{ rule.target_chat_id }}</small></span></td>
+    <td><span class="mode {{ rule.send_mode }}">{{ rule.send_mode|upper }}</span></td>
+    <td>{{ rule.delay_seconds }}s</td>
+    <td><span class="status {{ 'online' if rule.enabled else 'disabled' }}"><i></i>{{ '已启用' if rule.enabled else '已停用' }}</span></td>
+    <td><div class="actions nowrap"><form method="post" action="/rules/{{ rule.id }}/toggle"><button class="icon-button" title="启停">◐</button></form><a class="icon-button" href="/rules/{{ rule.id }}/edit" title="编辑">✎</a><form method="post" action="/rules/{{ rule.id }}/delete" data-confirm="确定删除规则“{{ rule.name }}”？"><button class="icon-button danger" title="删除">×</button></form></div></td>
+  </tr>{% endfor %}</tbody>
+</table></div></div>
+{% else %}<div class="empty"><span>⇄</span><h2>还没有转发规则</h2><p>先确保 Telegram 账号在线，再创建 Source → Target 规则。</p><a class="button primary" href="/rules/new">新增规则</a></div>{% endif %}
+{% endblock %}

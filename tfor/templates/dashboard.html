@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}运行概览{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">最近 24 小时</p><h1>运行概览</h1><p>账号连接状态与消息处理统计</p></div>
+  <span class="live-indicator"><i></i> 实时运行中</span>
+</div>
+
+<section class="stat-grid">
+  <article class="stat-card featured"><div class="stat-icon">◉</div><div><span>在线账号</span><strong>{{ stats.accounts.online }}<small>/ {{ stats.accounts.total }}</small></strong></div></article>
+  <article class="stat-card"><div class="stat-icon violet">⇄</div><div><span>启用规则</span><strong>{{ stats.rules.enabled }}<small>/ {{ stats.rules.total }}</small></strong></div></article>
+  <article class="stat-card"><div class="stat-icon cyan">↓</div><div><span>收到源消息</span><strong>{{ stats.received }}</strong></div></article>
+  <article class="stat-card"><div class="stat-icon amber">⚡</div><div><span>规则执行</span><strong>{{ stats.executions }}</strong></div></article>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><div><h2>处理结果</h2><p>每条源消息可能触发多条规则</p></div><span class="muted">24H</span></div>
+  <div class="result-grid">
+    <div><i class="dot slate"></i><span>被过滤</span><strong>{{ stats.filtered }}</strong></div>
+    <div><i class="dot green"></i><span>Forward 成功</span><strong>{{ stats.forwarded }}</strong></div>
+    <div><i class="dot blue"></i><span>Copy 成功</span><strong>{{ stats.copied }}</strong></div>
+    <div><i class="dot red"></i><span>发送失败</span><strong>{{ stats.failed }}</strong></div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><div><h2>最近错误</h2><p>最新的规则处理异常</p></div><a href="/logs?result=failed" class="text-link">查看全部 →</a></div>
+  {% if stats.errors %}
+  <div class="error-list">
+    {% for item in stats.errors %}<div><span class="error-badge">!</span><p><b>{{ item.rule_name }}</b><small>{{ item.error }}</small></p><time>{{ item.created_at[:19].replace('T', ' ') }} UTC</time></div>{% endfor %}
+  </div>
+  {% else %}<div class="empty compact"><span>✓</span><b>暂无错误</b><p>系统运行正常，最近没有处理异常。</p></div>{% endif %}
+</section>
+{% endblock %}

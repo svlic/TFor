@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}系统设置{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">全局配置</p><h1>系统设置</h1><p>用于新账号的默认值与系统运行策略</p></div></div>
+<div class="settings-grid"><form method="post" class="panel form-panel form-stack"><div class="section-title"><span>⚿</span><div><h2>默认 Telegram API 凭据</h2><p>仅预填新增账号表单，每个账号仍可单独修改</p></div></div><label>默认 API ID<input name="default_api_id" inputmode="numeric" value="{{ default_api_id }}" placeholder="12345678"></label><label>默认 API Hash<input name="default_api_hash" value="{{ default_api_hash }}" placeholder="32 位 API Hash"></label><button class="button primary">保存设置</button></form>
+<section class="panel form-panel"><div class="section-title"><span>◷</span><div><h2>日志策略</h2><p>隐私与清理策略</p></div></div><div class="setting-row"><span><b>处理日志保留时间</b><small>过期记录每小时自动清理</small></span><strong>{{ retention_days }} 天</strong></div><div class="setting-row"><span><b>消息正文存储</b><small>正文、Caption 与命中片段均不写入日志</small></span><strong class="safe">已禁用</strong></div></section></div>
+{% endblock %}

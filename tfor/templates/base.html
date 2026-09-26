@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}TFor{% endblock %} · Telegram Forwarder</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/app.css') }}">
+</head>
+<body>
+  <aside class="sidebar">
+    <a href="/" class="brand"><span class="brand-mark">T</span><span>TFor</span></a>
+    <nav>
+      <a href="/" class="{{ 'active' if active == '/' else '' }}"><span>⌂</span>运行概览</a>
+      <a href="/accounts" class="{{ 'active' if active.startswith('/accounts') else '' }}"><span>◉</span>Telegram 账号</a>
+      <a href="/rules" class="{{ 'active' if active.startswith('/rules') else '' }}"><span>⇄</span>转发规则</a>
+      <a href="/logs" class="{{ 'active' if active.startswith('/logs') else '' }}"><span>≡</span>处理日志</a>
+      <a href="/settings" class="{{ 'active' if active.startswith('/settings') else '' }}"><span>⚙</span>系统设置</a>
+    </nav>
+    <div class="sidebar-foot"><i></i> 单机运行模式</div>
+  </aside>
+  <main>
+    <header class="mobile-header"><a href="/" class="brand"><span class="brand-mark">T</span>TFor</a><button id="menu-toggle">☰</button></header>
+    {% if request.query_params.get('message') %}<div class="toast success">✓ {{ request.query_params.get('message') }}</div>{% endif %}
+    {% if request.query_params.get('error') %}<div class="toast error">! {{ request.query_params.get('error') }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+  <script src="{{ url_for('static', path='/app.js') }}"></script>
+</body>
+</html>

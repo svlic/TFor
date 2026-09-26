@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}处理日志{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">保留 3 天</p><h1>处理日志</h1><p>追踪每次规则执行，不保存消息正文或 Caption</p></div></div>
+<form class="filter-bar" method="get">
+  <select name="account_id"><option value="">全部账号</option>{% for account in accounts %}<option value="{{ account.id }}" {{ 'selected' if filters.account_id == account.id }}>{{ account.label }}</option>{% endfor %}</select>
+  <select name="rule_id"><option value="">全部规则</option>{% for rule in rules %}<option value="{{ rule.id }}" {{ 'selected' if filters.rule_id == rule.id }}>{{ rule.name }}</option>{% endfor %}</select>
+  <select name="result"><option value="">全部结果</option><option value="success" {{ 'selected' if filters.result == 'success' }}>成功</option><option value="filtered" {{ 'selected' if filters.result == 'filtered' }}>已过滤</option><option value="deleted" {{ 'selected' if filters.result == 'deleted' }}>源消息已删除</option><option value="failed" {{ 'selected' if filters.result == 'failed' }}>失败</option></select>
+  <button class="button">筛选</button><a href="/logs" class="text-link">重置</a>
+</form>
+{% if logs %}<div class="log-list">{% for item in logs %}<details class="log-card">
+  <summary><span class="result-icon {{ item.result }}">{{ {'success':'✓','filtered':'−','deleted':'×','failed':'!'}.get(item.result,'·') }}</span><div class="log-main"><b>{{ item.rule_name }}</b><small>{{ item.account_label }} · {{ item.source_chat_id }} / #{{ item.source_message_id }}</small></div><span class="mode {{ item.actual_mode or 'none' }}">{{ (item.actual_mode or item.result)|upper }}</span><time>{{ item.created_at[:19].replace('T',' ') }} UTC</time><i>⌄</i></summary>
+  <div class="log-detail"><dl><div><dt>目标 Chat</dt><dd>{{ item.target_chat_id }}</dd></div><div><dt>发送者</dt><dd>{{ item.sender_name or '未知' }} {% if item.sender_username %}@{{ item.sender_username }}{% endif %}</dd></div><div><dt>Sender ID</dt><dd>{{ item.sender_id or '—' }}</dd></div><div><dt>耗时</dt><dd>{{ item.duration_ms }} ms</dd></div></dl>
+    {% if item.filter_results %}<h4>过滤步骤</h4><div class="step-results">{% for step in item.filter_results %}<div><span>{{ loop.index }}</span><b>{{ step.kind }} · {{ step.field }} · {{ step.match_mode }}</b><em class="{{ step.outcome|lower }}">{{ step.outcome }}</em></div>{% endfor %}</div>{% endif %}
+    {% if item.error %}<div class="error-box">{{ item.error }}</div>{% endif %}
+  </div>
+</details>{% endfor %}</div>{% else %}<div class="empty"><span>≡</span><h2>暂无处理日志</h2><p>启用账号和规则后，新消息的处理过程会显示在这里。</p></div>{% endif %}
+{% endblock %}
