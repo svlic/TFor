@@ -235,11 +235,6 @@ class TelegramManager:
         task.add_done_callback(self.tasks.discard)
         return task
 
-    @staticmethod
-    def _consume_shared_task_exception(task: asyncio.Task[Any]) -> None:
-        if not task.cancelled():
-            task.exception()
-
     async def _schedule_rule(
         self,
         account_id: int,
@@ -351,7 +346,7 @@ class TelegramManager:
                 messages = self._spawn(
                     self._retry(lambda: self._fetch_messages(client, chat_id, message.id, grouped_id))
                 )
-                messages.add_done_callback(self._consume_shared_task_exception)
+                messages.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
             elif not grouped_id:
                 messages = [message]
         for rule in rules:
@@ -518,7 +513,11 @@ class TelegramManager:
         with TemporaryDirectory(prefix="tfor-") as directory:
             files: list[str] = []
             for index, message in enumerate(media_messages):
-                path = Path(directory) / f"{index}-{Path(self._filename(message)).name}"
+                file = getattr(message, "file", None)
+                name = getattr(file, "name", None)
+                if not name:
+                    name = f"telegram-{message.id}{getattr(file, 'ext', None) or ''}"
+                path = Path(directory) / f"{index}-{Path(name).name}"
                 downloaded = await self._retry(
                     lambda m=message, p=path: client.download_media(m, file=str(p))
                 )
@@ -536,15 +535,6 @@ class TelegramManager:
                 lambda: client.send_file(target, files if len(files) > 1 else files[0], **kwargs),
                 slow_mode_key=slow_mode_key,
             )
-
-    @staticmethod
-    def _filename(message: Any) -> str:
-        file = getattr(message, "file", None)
-        name = getattr(file, "name", None)
-        if name:
-            return name
-        extension = getattr(file, "ext", None) or ""
-        return f"telegram-{message.id}{extension}"
 
     async def _retry(
         self,
