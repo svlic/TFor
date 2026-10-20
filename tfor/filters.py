@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Any
 
 
+_ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\u2060\ufeff")
+
+
 @dataclass(slots=True)
 class MessageFields:
     text: str = ""
@@ -31,7 +34,7 @@ def evaluate_filters(steps: list[dict[str, Any]], fields: MessageFields) -> tupl
     for step in steps:
         if not step.get("enabled", True):
             continue
-        candidate = str(getattr(fields, step["field"]) or "")
+        candidate = str(getattr(fields, step["field"]) or "").translate(_ZERO_WIDTH_TRANSLATION)
         hit = any(_matches(candidate, str(value), step["match_mode"]) for value in step["values"])
         passed = not hit if step["kind"] == "blacklist" else hit
         results.append(
