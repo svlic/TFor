@@ -6,11 +6,31 @@
 
 需要 Docker Engine 和 Docker Compose 插件。发布镜像为 `ghcr.io/svlic/tfor`，支持 **linux/amd64** 和 **linux/arm64**（64 位 ARM，不含 ARMv7）；Docker 会自动选择主机对应的架构。
 
-```bash
-git clone https://github.com/svlic/TFor.git
-cd TFor
-cp .env.example .env
-# 按需编辑 .env 后启动
+无需 Git、Python 或项目源码。在空目录中创建 `compose.yaml` 即可部署：
+
+```bash copy Copy Deployment Commands
+mkdir -p tfor
+cd tfor
+cat > compose.yaml <<'YAML'
+services:
+  tfor:
+    image: ${TFOR_IMAGE:-ghcr.io/svlic/tfor:latest}
+    restart: unless-stopped
+    ports:
+      - "${TFOR_BIND_ADDRESS:-127.0.0.1}:${TFOR_PUBLISHED_PORT:-8000}:8000"
+    environment:
+      TFOR_DATABASE_PATH: /app/data/tfor.db
+      TFOR_HOST: 0.0.0.0
+      TFOR_PORT: 8000
+      TFOR_LOG_LEVEL: ${TFOR_LOG_LEVEL:-INFO}
+      TFOR_MAX_CONCURRENT_RULES: ${TFOR_MAX_CONCURRENT_RULES:-10}
+      TFOR_MAX_PENDING_RULES: ${TFOR_MAX_PENDING_RULES:-1000}
+      TFOR_MAX_CONCURRENT_COPIES: ${TFOR_MAX_CONCURRENT_COPIES:-4}
+      TFOR_MAX_CONCURRENT_COPIES_PER_ACCOUNT: ${TFOR_MAX_CONCURRENT_COPIES_PER_ACCOUNT:-2}
+      TFOR_INLINE_FLOOD_WAIT_SECONDS: ${TFOR_INLINE_FLOOD_WAIT_SECONDS:-60}
+    volumes:
+      - ./data:/app/data
+YAML
 docker compose pull
 docker compose up -d --no-build
 docker compose logs -f --tail=100
@@ -20,7 +40,13 @@ docker compose logs -f --tail=100
 
 默认仅监听宿主机 `127.0.0.1:8000`。在服务器本机访问 `http://127.0.0.1:8000`，或通过 SSH 隧道、带访问控制的反向代理访问。系统**没有登录认证**，不要直接暴露到公网。需要从局域网访问时，可在 `.env` 中设置 `TFOR_BIND_ADDRESS=0.0.0.0`，并通过防火墙限制来源。
 
-Compose 会自动读取同目录的 `.env`，并传入支持的应用配置：
+默认配置可直接启动，无需 `.env`。需要调整时，自行在 `compose.yaml` 同目录创建 `.env`，Compose 会自动读取并传入支持的应用配置：
+
+```dotenv copy Copy Environment Settings
+TFOR_IMAGE=ghcr.io/svlic/tfor:latest
+TFOR_BIND_ADDRESS=127.0.0.1
+TFOR_PUBLISHED_PORT=8000
+```
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -45,9 +71,12 @@ docker compose up -d --no-build
 
 ### 从源码构建
 
-不依赖 GHCR，直接在项目目录构建当前主机架构的镜像并启动：
+仅在需要自行构建时克隆源码，不依赖 GHCR。仓库中的 `compose.yaml` 包含 `build` 配置，可构建当前主机架构的镜像并启动：
 
 ```bash
+git clone https://github.com/svlic/TFor.git
+cd TFor
+cp .env.example .env
 docker compose build --pull
 docker compose up -d --no-build --pull never
 ```
@@ -65,7 +94,11 @@ docker compose up -d --no-build --pull never
 
 ## 本地 Python 运行
 
+先克隆源码并进入项目目录：
+
 ```bash
+git clone https://github.com/svlic/TFor.git
+cd TFor
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
